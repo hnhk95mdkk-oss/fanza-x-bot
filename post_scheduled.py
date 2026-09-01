@@ -88,12 +88,12 @@ def make_post_text(item):
         title = title[:80] + "…"
 
     return (
-        f"{intro}\n\n"
-        f"{title}\n\n"
-        f"▶ 作品はこちら\n"
-        f"{affiliate_url}\n\n"
-        f"#PR #FANZA"
-    )
+    f"【PR】\n"
+    f"{intro}\n\n"
+    f"{title}\n\n"
+    f"▶ 作品はこちら\n"
+    f"{affiliate_url}\n\n"
+    f"#FANZA")
 
 
 # ==================================================
