@@ -321,6 +321,16 @@ print(
 sample_movie = item.get(
     "sample_movie"
 )
+print("")
+print("=== SAMPLE MOVIE DEBUG ===")
+print(
+    json.dumps(
+        sample_movie,
+        ensure_ascii=False,
+        indent=2
+    )
+)
+print("==========================")
 
 video_url = choose_video_url(
     sample_movie
