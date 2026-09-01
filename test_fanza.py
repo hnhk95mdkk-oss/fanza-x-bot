@@ -1,10 +1,11 @@
 import os
 import requests
+import json
 
 API_URL = "https://api.dmm.com/affiliate/v3/ItemList"
 
-api_id = os.environ["DMM_API_ID"]
-affiliate_id = os.environ["DMM_AFFILIATE_ID"]
+api_id = os.environ["DMM_API_ID"].strip()
+affiliate_id = os.environ["DMM_AFFILIATE_ID"].strip()
 
 params = {
     "api_id": api_id,
@@ -17,22 +18,26 @@ params = {
     "output": "json",
 }
 
-response = requests.get(API_URL, params=params, timeout=30)
+response = requests.get(
+    API_URL,
+    params=params,
+    timeout=30
+)
 
 print("HTTP status:", response.status_code)
 
-response.raise_for_status()
+print("")
+print("=== RESPONSE ===")
+print(response.text)
+print("================")
+print("")
+
+if response.status_code != 200:
+    raise SystemExit("FANZA API request failed")
 
 data = response.json()
 
-result = data.get("result", {})
-
-if result.get("status") != 200:
-    print("API error:")
-    print(data)
-    raise SystemExit(1)
-
-items = result.get("items", [])
+items = data.get("result", {}).get("items", [])
 
 if not items:
     print("商品が取得できませんでした。")
@@ -40,17 +45,9 @@ if not items:
 
 item = items[0]
 
-title = item.get("title", "タイトル不明")
-price = item.get("prices", {}).get("price", "価格不明")
-affiliate_url = item.get("affiliateURL", "URLなし")
-product_url = item.get("URL", "URLなし")
-image_url = item.get("imageURL", {}).get("large", "画像なし")
-
-print("")
-print("=== FANZA API TEST ===")
-print("タイトル:", title)
-print("価格:", price)
-print("商品URL:", product_url)
-print("アフィリエイトURL:", affiliate_url)
-print("画像URL:", image_url)
-print("======================")
+print("=== FANZA ITEM ===")
+print("タイトル:", item.get("title"))
+print("価格:", item.get("prices", {}).get("price"))
+print("商品URL:", item.get("URL"))
+print("アフィリエイトURL:", item.get("affiliateURL"))
+print("画像URL:", item.get("imageURL", {}).get("large"))
