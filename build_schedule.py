@@ -23,75 +23,26 @@ TOTAL_POSTS = 30
 JST = ZoneInfo("Asia/Tokyo")
 
 EXCLUDE_FILE = "exclude_words.txt"
-def is_available_now(item):
 
-    now = datetime.now(JST)
-
-    date_text = (
-        item.get("date")
-        or item.get("release_date")
-        or item.get("deliveryStartDate")
-    )
-
-    # 日付情報がない場合は、とりあえず残す
-    if not date_text:
-        return True
-
-    date_text = str(date_text).strip()
-
-    formats = [
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%d",
-        "%Y/%m/%d",
-    ]
-
-    for fmt in formats:
-
-        try:
-            release = datetime.strptime(
-                date_text,
-                fmt
-            )
-
-            release = release.replace(
-                tzinfo=JST
-            )
-
-            return release <= now
-
-        except ValueError:
-            continue
-
-    # 日付形式が分からない場合は除外せず残す
-    return True
 
 # ==================================================
 # 除外ワード読み込み
 # ==================================================
 
 def load_exclude_words():
-
     if not os.path.exists(EXCLUDE_FILE):
         print("exclude_words.txt がありません。")
         return []
 
     words = []
 
-    with open(
-        EXCLUDE_FILE,
-        "r",
-        encoding="utf-8"
-    ) as f:
-
+    with open(EXCLUDE_FILE, "r", encoding="utf-8") as f:
         for line in f:
-
             word = line.strip()
 
-            # 空行
             if not word:
                 continue
 
-            # コメント
             if word.startswith("#"):
                 continue
 
@@ -101,7 +52,6 @@ def load_exclude_words():
 
 
 EXCLUDE_WORDS = load_exclude_words()
-
 
 print("")
 print("=== 除外ワード ===")
@@ -120,7 +70,6 @@ print("==================")
 # ==================================================
 
 def fetch_genre_items(genre_id):
-
     params = {
         "api_id": API_ID,
         "affiliate_id": AFFILIATE_ID,
@@ -128,10 +77,7 @@ def fetch_genre_items(genre_id):
         "service": "digital",
         "floor": "videoa",
         "genre_id": genre_id,
-
-        # 除外ワードで減ることを想定して多めに取得
         "hits": 100,
-
         "sort": "date",
         "output": "json",
     }
@@ -148,21 +94,15 @@ def fetch_genre_items(genre_id):
     )
 
     if response.status_code != 200:
-
         print(response.text)
-
         return []
 
     data = response.json()
 
-    result = data.get(
-        "result",
-        {}
-    )
-
-    return result.get(
-        "items",
-        []
+    return (
+        data
+        .get("result", {})
+        .get("items", [])
     )
 
 
@@ -171,14 +111,12 @@ def fetch_genre_items(genre_id):
 # ==================================================
 
 def find_excluded_word(text):
-
     if not text:
         return None
 
     text_lower = text.lower()
 
     for word in EXCLUDE_WORDS:
-
         if word.lower() in text_lower:
             return word
 
@@ -189,23 +127,10 @@ def find_excluded_word(text):
 # 商品データを候補化
 # ==================================================
 
-def make_candidate(
-    item,
-    genre_id
-):
-
-    content_id = item.get(
-        "content_id"
-    )
-
-    title = item.get(
-        "title",
-        ""
-    )
-
-    affiliate_url = item.get(
-        "affiliateURL"
-    )
+def make_candidate(item, genre_id):
+    content_id = item.get("content_id")
+    title = item.get("title", "")
+    affiliate_url = item.get("affiliateURL")
 
     image_url = (
         item
@@ -213,9 +138,7 @@ def make_candidate(
         .get("large")
     )
 
-    sample_movie = item.get(
-        "sampleMovieURL"
-    )
+    sample_movie = item.get("sampleMovieURL")
 
     sample_images = (
         item
@@ -223,12 +146,8 @@ def make_candidate(
         .get("sample_s", {})
         .get("image", [])
     )
-  
 
-    # --------------------------
     # 必須データ
-    # --------------------------
-
     if not content_id:
         return None
 
@@ -241,58 +160,27 @@ def make_candidate(
     if not image_url:
         return None
 
-    # サンプル動画なしは除外
     if not sample_movie:
         return None
 
-
-    # --------------------------
     # 除外ワード
-    # --------------------------
-
-    excluded_word = (
-        find_excluded_word(
-            title
-        )
-    )
+    excluded_word = find_excluded_word(title)
 
     if excluded_word:
-
         print(
-            "除外 "
-            f"[{excluded_word}] "
+            f"除外 [{excluded_word}] "
             f"{title}"
         )
-
         return None
 
-
-    # --------------------------
-    # 候補
-    # --------------------------
-
     return {
-
-        "content_id":
-            content_id,
-
-        "genre_id":
-            str(genre_id),
-
-        "title":
-            title,
-
-        "affiliate_url":
-            affiliate_url,
-
-        "image_url":
-            image_url,
-
-        "sample_images":
-            sample_images,
-
-        "sample_movie":
-            sample_movie,
+        "content_id": content_id,
+        "genre_id": str(genre_id),
+        "title": title,
+        "affiliate_url": affiliate_url,
+        "image_url": image_url,
+        "sample_images": sample_images,
+        "sample_movie": sample_movie,
     }
 
 
@@ -301,28 +189,29 @@ def make_candidate(
 # ==================================================
 
 candidates = []
-
 used_ids = set()
-
 
 for genre_id in GENRE_IDS:
 
     print("")
     print("====================")
-    print(
-        "ジャンル:",
-        genre_id
-    )
+    print("ジャンル:", genre_id)
     print("====================")
 
-    items = fetch_genre_items(
-        genre_id
-    )
+    items = fetch_genre_items(genre_id)
 
     genre_count = 0
 
+    for i, item in enumerate(items):
 
-    for item in items:
+        # 最初の3件だけAPIの実データを確認
+        if i < 3:
+            print("")
+            print("=== DEBUG ITEM ===")
+            print("TITLE:", item.get("title"))
+            print("DATE:", item.get("date"))
+            print("KEYS:", list(item.keys()))
+            print("==================")
 
         candidate = make_candidate(
             item,
@@ -332,53 +221,29 @@ for genre_id in GENRE_IDS:
         if candidate is None:
             continue
 
+        content_id = candidate["content_id"]
 
-        content_id = (
-            candidate[
-                "content_id"
-            ]
-        )
-
-
-        # --------------------------
         # 他ジャンルですでに採用済み
-        # --------------------------
-
         if content_id in used_ids:
             continue
 
-
-        candidates.append(
-            candidate
-        )
-
-        used_ids.add(
-            content_id
-        )
+        candidates.append(candidate)
+        used_ids.add(content_id)
 
         genre_count += 1
 
-
-        if (
-            genre_count
-            >= POSTS_PER_GENRE
-        ):
+        if genre_count >= POSTS_PER_GENRE:
             break
-
 
     print(
         "採用作品数:",
-        f"{genre_count}/"
-        f"{POSTS_PER_GENRE}"
+        f"{genre_count}/{POSTS_PER_GENRE}"
     )
 
 
 print("")
 print("====================")
-print(
-    "候補合計:",
-    len(candidates)
-)
+print("候補合計:", len(candidates))
 print("====================")
 
 
@@ -388,106 +253,54 @@ print("====================")
 
 by_genre = {}
 
-
 for item in candidates:
-
-    genre = item[
-        "genre_id"
-    ]
+    genre = item["genre_id"]
 
     if genre not in by_genre:
+        by_genre[genre] = []
 
-        by_genre[
-            genre
-        ] = []
-
-    by_genre[
-        genre
-    ].append(
-        item
-    )
+    by_genre[genre].append(item)
 
 
-# 同ジャンル内の順番もランダム
+# 同ジャンル内もランダム
 for genre in by_genre:
-
-    random.shuffle(
-        by_genre[
-            genre
-        ]
-    )
+    random.shuffle(by_genre[genre])
 
 
 # ==================================================
-# ジャンルを分散
+# ジャンル分散
 # ==================================================
 
-genre_ids_available = list(
-    by_genre.keys()
-)
+genre_ids_available = list(by_genre.keys())
 
 mixed_candidates = []
-
 previous_genre = None
 
-
-while (
-    len(mixed_candidates)
-    < TOTAL_POSTS
-):
+while len(mixed_candidates) < TOTAL_POSTS:
 
     available = [
-
         genre
-        for genre
-        in genre_ids_available
-
-        if by_genre[
-            genre
-        ]
-
+        for genre in genre_ids_available
+        if by_genre[genre]
     ]
-
 
     if not available:
         break
 
-
-    # 直前ジャンル以外を優先
     different_genres = [
-
         genre
-        for genre
-        in available
-
-        if genre
-        != previous_genre
-
+        for genre in available
+        if genre != previous_genre
     ]
 
-
     if different_genres:
-
-        genre = random.choice(
-            different_genres
-        )
-
+        genre = random.choice(different_genres)
     else:
+        genre = random.choice(available)
 
-        genre = random.choice(
-            available
-        )
+    item = by_genre[genre].pop(0)
 
-
-    item = by_genre[
-        genre
-    ].pop(0)
-
-
-    mixed_candidates.append(
-        item
-    )
-
+    mixed_candidates.append(item)
 
     previous_genre = genre
 
@@ -497,31 +310,18 @@ while (
 # ==================================================
 
 TIME_WINDOWS = [
-
-    # 朝
     ((7, 30), (8, 30)),
-
-    # 夕
     ((17, 30), (18, 30)),
-
-    # 夜
     ((22, 30), (23, 30)),
 ]
 
 
-def random_time_for_date(
-    target_date,
-    window
-):
+def random_time_for_date(target_date, window):
 
-    (
-        start_hour,
-        start_minute
-    ), (
+    (start_hour, start_minute), (
         end_hour,
         end_minute
     ) = window
-
 
     start = datetime(
         target_date.year,
@@ -533,7 +333,6 @@ def random_time_for_date(
         tzinfo=JST,
     )
 
-
     end = datetime(
         target_date.year,
         target_date.month,
@@ -544,27 +343,17 @@ def random_time_for_date(
         tzinfo=JST,
     )
 
-
     seconds_range = int(
-        (
-            end - start
-        ).total_seconds()
+        (end - start).total_seconds()
     )
 
-
-    random_seconds = (
-        random.randint(
-            0,
-            seconds_range
-        )
+    random_seconds = random.randint(
+        0,
+        seconds_range
     )
 
-
-    return (
-        start
-        + timedelta(
-            seconds=random_seconds
-        )
+    return start + timedelta(
+        seconds=random_seconds
     )
 
 
@@ -572,86 +361,49 @@ def random_time_for_date(
 # 10日 × 1日3投稿
 # ==================================================
 
-now = datetime.now(
-    JST
-)
+now = datetime.now(JST)
 
 start_date = (
-    now
-    + timedelta(days=1)
+    now + timedelta(days=1)
 ).date()
-
 
 schedule = []
 
 index = 0
 
-
 for day in range(10):
 
     target_date = (
         start_date
-        + timedelta(
-            days=day
-        )
+        + timedelta(days=day)
     )
-
 
     for window in TIME_WINDOWS:
 
-        if (
-            index
-            >= len(
-                mixed_candidates
-            )
-        ):
+        if index >= len(mixed_candidates):
             break
 
-
-        scheduled_at = (
-            random_time_for_date(
-                target_date,
-                window
-            )
+        scheduled_at = random_time_for_date(
+            target_date,
+            window
         )
 
-
-        item = (
-            mixed_candidates[
-                index
-            ]
-        )
-
+        item = mixed_candidates[index]
 
         schedule.append({
-
-            "scheduled_at":
-                scheduled_at
-                .isoformat(),
-
-            "status":
-                "pending",
-
-            "posted_at":
-                None,
-
-            "tweet_id":
-                None,
-
-            "video_attached":
-                False,
-
+            "scheduled_at": scheduled_at.isoformat(),
+            "status": "pending",
+            "posted_at": None,
+            "tweet_id": None,
+            "video_attached": False,
             **item,
         })
-
 
         index += 1
 
 
-# 念のため時刻順
 schedule.sort(
-    key=lambda x:
-        x["scheduled_at"]
+    key=lambda x: x["scheduled_at"]
 )
 
 
@@ -678,10 +430,7 @@ with open(
 # ==================================================
 
 print("")
-print(
-    "=== 投稿予定 ==="
-)
-
+print("=== 投稿予定 ===")
 
 for number, item in enumerate(
     schedule,
@@ -690,16 +439,10 @@ for number, item in enumerate(
 
     print(
         number,
-        item[
-            "scheduled_at"
-        ],
+        item["scheduled_at"],
         "genre:",
-        item[
-            "genre_id"
-        ],
-        item[
-            "title"
-        ]
+        item["genre_id"],
+        item["title"]
     )
 
 
@@ -710,13 +453,11 @@ print(
     "件保存しました。"
 )
 
-
 if len(schedule) < TOTAL_POSTS:
 
     print("")
     print(
-        "⚠️ 30件に"
-        "届きませんでした。"
+        "⚠️ 30件に届きませんでした。"
     )
 
     print(
