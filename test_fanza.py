@@ -1,6 +1,5 @@
 import os
 import requests
-import json
 
 API_URL = "https://api.dmm.com/affiliate/v3/ItemList"
 
@@ -25,7 +24,6 @@ response = requests.get(
 )
 
 print("HTTP status:", response.status_code)
-
 print("")
 print("=== RESPONSE ===")
 print(response.text)
