@@ -23,7 +23,47 @@ TOTAL_POSTS = 30
 JST = ZoneInfo("Asia/Tokyo")
 
 EXCLUDE_FILE = "exclude_words.txt"
+def is_available_now(item):
 
+    now = datetime.now(JST)
+
+    date_text = (
+        item.get("date")
+        or item.get("release_date")
+        or item.get("deliveryStartDate")
+    )
+
+    # 日付情報がない場合は、とりあえず残す
+    if not date_text:
+        return True
+
+    date_text = str(date_text).strip()
+
+    formats = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+        "%Y/%m/%d",
+    ]
+
+    for fmt in formats:
+
+        try:
+            release = datetime.strptime(
+                date_text,
+                fmt
+            )
+
+            release = release.replace(
+                tzinfo=JST
+            )
+
+            return release <= now
+
+        except ValueError:
+            continue
+
+    # 日付形式が分からない場合は除外せず残す
+    return True
 
 # ==================================================
 # 除外ワード読み込み
