@@ -1,0 +1,42 @@
+name: Build FANZA Schedule
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build schedule
+        env:
+          DMM_API_ID: ${{ secrets.DMM_API_ID }}
+          DMM_AFFILIATE_ID: ${{ secrets.DMM_AFFILIATE_ID }}
+          DMM_GENRE_IDS: ${{ secrets.DMM_GENRE_IDS }}
+        run: python build_schedule.py
+
+      - name: Save schedule.json
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git add schedule.json
+
+          git diff --cached --quiet || \
+          git commit -m "Update FANZA posting schedule"
+
+          git push
