@@ -130,6 +130,28 @@ def find_video_urls(value):
 
 def choose_video_url(sample_movie):
 
+    if not isinstance(sample_movie, dict):
+        return None
+
+    # 高画質から優先
+    preferred_keys = [
+        "size_720_480",
+        "size_644_414",
+        "size_560_360",
+        "size_476_306",
+    ]
+
+    for key in preferred_keys:
+
+        url = sample_movie.get(key)
+
+        if isinstance(url, str) and url.startswith(
+            ("http://", "https://")
+        ):
+            return url
+
+    return None
+
     urls = find_video_urls(sample_movie)
 
     if not urls:
