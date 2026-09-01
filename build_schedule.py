@@ -128,9 +128,62 @@ def is_available_now(item):
 # FANZA API
 # ==================================================
 
-def fetch_genre_items(
-    genre_id,
-    offset
+def fetch_genre_items(genre_id, offset):
+
+    now = datetime.now(JST)
+
+    # DMM API用。タイムゾーンなしISO8601
+    lte_date = now.strftime(
+        "%Y-%m-%dT%H:%M:%S"
+    )
+
+    params = {
+        "api_id": API_ID,
+        "affiliate_id": AFFILIATE_ID,
+        "site": "FANZA",
+        "service": "digital",
+        "floor": "videoa",
+
+        # ★ジャンル指定
+        "article": "genre",
+        "article_id": genre_id,
+
+        "hits": HITS_PER_PAGE,
+        "offset": offset,
+
+        # 新しい順
+        "sort": "date",
+
+        # ★現在日時より未来の発売作品を除外
+        "lte_date": lte_date,
+
+        "output": "json",
+    }
+
+    response = requests.get(
+        API_URL,
+        params=params,
+        timeout=30
+    )
+
+    print(
+        f"genre={genre_id} "
+        f"offset={offset} "
+        f"lte_date={lte_date} "
+        f"HTTP={response.status_code}"
+    )
+
+    if response.status_code != 200:
+        print(response.text)
+        return []
+
+    data = response.json()
+
+    return (
+        data
+        .get("result", {})
+        .get("items", [])
+    )
 ):
 
     params = {
