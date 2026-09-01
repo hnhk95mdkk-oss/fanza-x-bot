@@ -1,10 +1,15 @@
 import os
 import json
 import random
+import math
 import requests
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+
+# ==================================================
+# 基本設定
+# ==================================================
 
 API_URL = "https://api.dmm.com/affiliate/v3/ItemList"
 
@@ -17,30 +22,196 @@ GENRE_IDS = [
     if x.strip()
 ]
 
-POSTS_PER_GENRE = 6
-TOTAL_POSTS = 30
-
-HITS_PER_PAGE = 100
-MAX_PAGES_PER_GENRE = 10
+SCHEDULE_FILE = "schedule.json"
+POSTED_IDS_FILE = "posted_ids.json"
+EXCLUDE_FILE = "exclude_words.txt"
 
 JST = ZoneInfo("Asia/Tokyo")
 
-EXCLUDE_FILE = "exclude_words.txt"
+# pending がこの件数以下になったら補充
+REFILL_THRESHOLD = 10
+
+# 補充後にこの件数を目指す
+TARGET_STOCK = 30
+
+# FANZA API
+HITS_PER_PAGE = 100
+MAX_PAGES_PER_GENRE = 10
+
+
+# 投稿時間帯
+TIME_WINDOWS = [
+    # 朝 07:30〜08:30
+    ((7, 30), (8, 30)),
+
+    # 夕 17:30〜18:30
+    ((17, 30), (18, 30)),
+
+    # 夜 22:30〜23:30
+    ((22, 30), (23, 30)),
+]
 
 
 # ==================================================
-# 除外ワード読み込み
+# JSON読み込み
+# ==================================================
+
+def load_json_file(path, default):
+
+    if not os.path.exists(path):
+        return default
+
+    try:
+        with open(
+            path,
+            "r",
+            encoding="utf-8"
+        ) as f:
+            return json.load(f)
+
+    except Exception as e:
+        print(
+            f"⚠️ {path} の読み込み失敗:",
+            str(e)
+        )
+        return default
+
+
+# ==================================================
+# 現在のスケジュール
+# ==================================================
+
+current_schedule = load_json_file(
+    SCHEDULE_FILE,
+    []
+)
+
+# pendingだけ残す
+pending_items = [
+    item
+    for item in current_schedule
+    if item.get("status") == "pending"
+]
+
+
+print("")
+print("==========================")
+print("現在のpending:", len(pending_items))
+print("==========================")
+
+
+# ==================================================
+# 在庫が十分なら終了
+# ==================================================
+
+if len(pending_items) > REFILL_THRESHOLD:
+
+    print("")
+    print(
+        f"✅ まだ {len(pending_items)}件 "
+        "残っています。"
+    )
+
+    print(
+        f"{REFILL_THRESHOLD}件以下に"
+        "なるまで補充しません。"
+    )
+
+    raise SystemExit(0)
+
+
+# ==================================================
+# 必要な補充件数
+# ==================================================
+
+needed = (
+    TARGET_STOCK
+    - len(pending_items)
+)
+
+
+if needed <= 0:
+
+    print(
+        "在庫は十分あります。"
+    )
+
+    raise SystemExit(0)
+
+
+print("")
+print(
+    f"📦 {needed}件を"
+    "新しく補充します。"
+)
+
+
+# ==================================================
+# 投稿済みID読み込み
+# ==================================================
+
+posted_ids_list = load_json_file(
+    POSTED_IDS_FILE,
+    []
+)
+
+posted_ids = set(
+    str(x)
+    for x in posted_ids_list
+)
+
+
+print(
+    "過去投稿済みID:",
+    len(posted_ids)
+)
+
+
+# ==================================================
+# 現在予約中のID
+# ==================================================
+
+scheduled_ids = set()
+
+for item in pending_items:
+
+    content_id = item.get(
+        "content_id"
+    )
+
+    if content_id:
+        scheduled_ids.add(
+            str(content_id)
+        )
+
+
+print(
+    "現在予約中ID:",
+    len(scheduled_ids)
+)
+
+
+# ==================================================
+# 除外ワード
 # ==================================================
 
 def load_exclude_words():
-    if not os.path.exists(EXCLUDE_FILE):
-        print("exclude_words.txt がありません。")
+
+    if not os.path.exists(
+        EXCLUDE_FILE
+    ):
         return []
 
     words = []
 
-    with open(EXCLUDE_FILE, "r", encoding="utf-8") as f:
+    with open(
+        EXCLUDE_FILE,
+        "r",
+        encoding="utf-8"
+    ) as f:
+
         for line in f:
+
             word = line.strip()
 
             if not word:
@@ -54,14 +225,19 @@ def load_exclude_words():
     return words
 
 
-EXCLUDE_WORDS = load_exclude_words()
+EXCLUDE_WORDS = (
+    load_exclude_words()
+)
+
 
 print("")
 print("=== 除外ワード ===")
 
 if EXCLUDE_WORDS:
+
     for word in EXCLUDE_WORDS:
         print("-", word)
+
 else:
     print("なし")
 
@@ -69,16 +245,41 @@ print("==================")
 
 
 # ==================================================
-# 日付判定
+# 除外ワード判定
+# ==================================================
+
+def find_excluded_word(text):
+
+    if not text:
+        return None
+
+    text_lower = text.lower()
+
+    for word in EXCLUDE_WORDS:
+
+        if (
+            word.lower()
+            in text_lower
+        ):
+            return word
+
+    return None
+
+
+# ==================================================
+# 配信開始日
 # ==================================================
 
 def parse_release_date(item):
+
     date_text = item.get("date")
 
     if not date_text:
         return None
 
-    date_text = str(date_text).strip()
+    date_text = str(
+        date_text
+    ).strip()
 
     formats = [
         "%Y-%m-%d %H:%M:%S",
@@ -88,48 +289,91 @@ def parse_release_date(item):
     ]
 
     for fmt in formats:
+
         try:
-            dt = datetime.strptime(date_text, fmt)
-            return dt.replace(tzinfo=JST)
+
+            result = (
+                datetime.strptime(
+                    date_text,
+                    fmt
+                )
+            )
+
+            return result.replace(
+                tzinfo=JST
+            )
+
         except ValueError:
             continue
 
     return None
 
 
-def is_available_now(item):
-    release_date = parse_release_date(item)
+# ==================================================
+# 今すぐ視聴可能か
+# ==================================================
 
+def is_available_now(item):
+
+    release_date = (
+        parse_release_date(item)
+    )
+
+    # 日付不明は今回は採用しない
     if release_date is None:
-        # 判定不能なものは今回は採用しない
         return False
 
-    now = datetime.now(JST)
-
-    return release_date <= now
+    return (
+        release_date
+        <= datetime.now(JST)
+    )
 
 
 # ==================================================
 # FANZA API
 # ==================================================
 
-def fetch_genre_items(genre_id, offset):
+def fetch_genre_items(
+    genre_id,
+    offset
+):
+
     params = {
-        "api_id": API_ID,
-        "affiliate_id": AFFILIATE_ID,
-        "site": "FANZA",
-        "service": "digital",
-        "floor": "videoa",
+        "api_id":
+            API_ID,
 
-        # ジャンル指定
-        "article": "genre",
-        "article_id": genre_id,
+        "affiliate_id":
+            AFFILIATE_ID,
 
-        "hits": HITS_PER_PAGE,
-        "offset": offset,
-        "sort": "date",
-        "output": "json",
+        "site":
+            "FANZA",
+
+        "service":
+            "digital",
+
+        "floor":
+            "videoa",
+
+        # ジャンル
+        "article":
+            "genre",
+
+        "article_id":
+            genre_id,
+
+        "hits":
+            HITS_PER_PAGE,
+
+        "offset":
+            offset,
+
+        "sort":
+            "date",
+
+        "output":
+            "json",
     }
+
 
     response = requests.get(
         API_URL,
@@ -137,17 +381,28 @@ def fetch_genre_items(genre_id, offset):
         timeout=30
     )
 
+
     print(
         f"genre={genre_id} "
         f"offset={offset} "
         f"HTTP={response.status_code}"
     )
 
-    if response.status_code != 200:
-        print(response.text)
+
+    if (
+        response.status_code
+        != 200
+    ):
+
+        print(
+            response.text
+        )
+
         return []
 
+
     data = response.json()
+
 
     return (
         data
@@ -157,30 +412,26 @@ def fetch_genre_items(genre_id, offset):
 
 
 # ==================================================
-# 除外ワード
-# ==================================================
-
-def find_excluded_word(text):
-    if not text:
-        return None
-
-    text_lower = text.lower()
-
-    for word in EXCLUDE_WORDS:
-        if word.lower() in text_lower:
-            return word
-
-    return None
-
-
-# ==================================================
 # 商品候補化
 # ==================================================
 
-def make_candidate(item, genre_id):
-    content_id = item.get("content_id")
-    title = item.get("title", "")
-    affiliate_url = item.get("affiliateURL")
+def make_candidate(
+    item,
+    genre_id
+):
+
+    content_id = item.get(
+        "content_id"
+    )
+
+    title = item.get(
+        "title",
+        ""
+    )
+
+    affiliate_url = item.get(
+        "affiliateURL"
+    )
 
     image_url = (
         item
@@ -188,7 +439,9 @@ def make_candidate(item, genre_id):
         .get("large")
     )
 
-    sample_movie = item.get("sampleMovieURL")
+    sample_movie = item.get(
+        "sampleMovieURL"
+    )
 
     sample_images = (
         item
@@ -197,26 +450,21 @@ def make_candidate(item, genre_id):
         .get("image", [])
     )
 
-    release_date = parse_release_date(item)
+    release_date = (
+        parse_release_date(item)
+    )
 
-    # -----------------------------
-    # 予約・未来日作品を除外
-    # -----------------------------
 
-    if not is_available_now(item):
-        print(
-            "予約・未配信 除外:",
-            item.get("date"),
-            title
-        )
-        return None
-
-    # -----------------------------
-    # 必須条件
-    # -----------------------------
+    # ------------------------------
+    # 基本項目
+    # ------------------------------
 
     if not content_id:
         return None
+
+    content_id = str(
+        content_id
+    )
 
     if not title:
         return None
@@ -227,44 +475,133 @@ def make_candidate(item, genre_id):
     if not image_url:
         return None
 
+    # サンプル動画必須
     if not sample_movie:
         return None
 
-    # -----------------------------
-    # 除外ワード
-    # -----------------------------
 
-    excluded_word = find_excluded_word(title)
+    # ------------------------------
+    # 予約・未配信除外
+    # ------------------------------
+
+    if not is_available_now(item):
+
+        print(
+            "予約・未配信 除外:",
+            item.get("date"),
+            title
+        )
+
+        return None
+
+
+    # ------------------------------
+    # 過去投稿済み
+    # ------------------------------
+
+    if content_id in posted_ids:
+
+        print(
+            "過去投稿済み 除外:",
+            title
+        )
+
+        return None
+
+
+    # ------------------------------
+    # 現在scheduleにある
+    # ------------------------------
+
+    if content_id in scheduled_ids:
+
+        print(
+            "予約済み 除外:",
+            title
+        )
+
+        return None
+
+
+    # ------------------------------
+    # 除外ワード
+    # ------------------------------
+
+    excluded_word = (
+        find_excluded_word(
+            title
+        )
+    )
+
 
     if excluded_word:
+
         print(
             f"除外 [{excluded_word}] "
             f"{title}"
         )
+
         return None
 
+
+    # ------------------------------
+    # 採用可能
+    # ------------------------------
+
     return {
-        "content_id": content_id,
-        "genre_id": str(genre_id),
-        "title": title,
-        "release_date": (
-            release_date.isoformat()
-            if release_date
-            else None
-        ),
-        "affiliate_url": affiliate_url,
-        "image_url": image_url,
-        "sample_images": sample_images,
-        "sample_movie": sample_movie,
+
+        "content_id":
+            content_id,
+
+        "genre_id":
+            str(genre_id),
+
+        "title":
+            title,
+
+        "release_date":
+            (
+                release_date.isoformat()
+                if release_date
+                else None
+            ),
+
+        "affiliate_url":
+            affiliate_url,
+
+        "image_url":
+            image_url,
+
+        "sample_images":
+            sample_images,
+
+        "sample_movie":
+            sample_movie,
     }
 
 
 # ==================================================
-# 各ジャンルから6本確保
+# 新規候補収集
 # ==================================================
 
-candidates = []
-used_ids = set()
+new_candidates = []
+
+new_candidate_ids = set()
+
+
+# 必要本数をジャンル数で均等配分
+per_genre_target = math.ceil(
+    needed
+    / len(GENRE_IDS)
+)
+
+
+print("")
+print(
+    "1ジャンルあたり目安:",
+    per_genre_target
+)
+
 
 for genre_id in GENRE_IDS:
 
@@ -275,75 +612,125 @@ for genre_id in GENRE_IDS:
 
     genre_candidates = []
 
-    for page in range(MAX_PAGES_PER_GENRE):
 
-        if len(genre_candidates) >= POSTS_PER_GENRE:
+    for page in range(
+        MAX_PAGES_PER_GENRE
+    ):
+
+        if (
+            len(genre_candidates)
+            >= per_genre_target
+        ):
             break
 
-        offset = (
-            page * HITS_PER_PAGE
-        ) + 1
 
-        print(
-            f"ページ {page + 1} "
-            f"(offset={offset})"
+        offset = (
+            page
+            * HITS_PER_PAGE
+            + 1
         )
+
 
         items = fetch_genre_items(
             genre_id,
             offset
         )
 
+
         if not items:
-            print("商品がなくなりました。")
             break
+
 
         for item in items:
 
-            candidate = make_candidate(
-                item,
-                genre_id
+            candidate = (
+                make_candidate(
+                    item,
+                    genre_id
+                )
             )
+
 
             if candidate is None:
                 continue
 
-            content_id = candidate["content_id"]
 
-            if content_id in used_ids:
-                continue
-
-            genre_candidates.append(candidate)
-            used_ids.add(content_id)
-
-            print(
-                "✅ 採用:",
-                candidate["release_date"],
-                candidate["title"]
+            content_id = (
+                candidate[
+                    "content_id"
+                ]
             )
 
-            if len(genre_candidates) >= POSTS_PER_GENRE:
+
+            # 今回の補充内で重複
+            if (
+                content_id
+                in new_candidate_ids
+            ):
+                continue
+
+
+            genre_candidates.append(
+                candidate
+            )
+
+            new_candidates.append(
+                candidate
+            )
+
+            new_candidate_ids.add(
+                content_id
+            )
+
+            # 以降の別ジャンル検索でも除外
+            scheduled_ids.add(
+                content_id
+            )
+
+
+            print(
+                "✅ 新規採用:",
+                candidate[
+                    "release_date"
+                ],
+                candidate[
+                    "title"
+                ]
+            )
+
+
+            if (
+                len(genre_candidates)
+                >= per_genre_target
+            ):
                 break
 
+
     print(
-        "ジャンル採用:",
+        "このジャンル:",
         len(genre_candidates),
-        "/",
-        POSTS_PER_GENRE
+        "件"
     )
 
-    candidates.extend(
-        genre_candidates
-    )
+
+# ==================================================
+# 必要数を超えたら調整
+# ==================================================
+
+random.shuffle(
+    new_candidates
+)
+
+new_candidates = (
+    new_candidates[:needed]
+)
 
 
 print("")
-print("========================")
 print(
-    "候補合計:",
-    len(candidates)
+    "新規候補合計:",
+    len(new_candidates)
 )
-print("========================")
 
 
 # ==================================================
@@ -352,24 +739,39 @@ print("========================")
 
 by_genre = {}
 
-for item in candidates:
-    genre = item["genre_id"]
+
+for item in new_candidates:
+
+    genre = item[
+        "genre_id"
+    ]
 
     by_genre.setdefault(
         genre,
         []
-    ).append(item)
+    ).append(
+        item
+    )
+
 
 for genre in by_genre:
+
     random.shuffle(
-        by_genre[genre]
+        by_genre[
+            genre
+        ]
     )
 
 
 mixed_candidates = []
+
 previous_genre = None
 
-while len(mixed_candidates) < TOTAL_POSTS:
+
+while (
+    len(mixed_candidates)
+    < len(new_candidates)
+):
 
     available = [
         genre
@@ -378,43 +780,53 @@ while len(mixed_candidates) < TOTAL_POSTS:
         if items
     ]
 
+
     if not available:
         break
 
-    different_genres = [
+
+    different = [
         genre
         for genre in available
         if genre != previous_genre
     ]
 
-    if different_genres:
-        selected_genre = random.choice(
-            different_genres
+
+    if different:
+
+        selected_genre = (
+            random.choice(
+                different
+            )
         )
+
     else:
-        selected_genre = random.choice(
-            available
+
+        selected_genre = (
+            random.choice(
+                available
+            )
         )
+
 
     item = by_genre[
         selected_genre
     ].pop(0)
 
-    mixed_candidates.append(item)
 
-    previous_genre = selected_genre
+    mixed_candidates.append(
+        item
+    )
+
+
+    previous_genre = (
+        selected_genre
+    )
 
 
 # ==================================================
-# 投稿時間帯
+# ランダム投稿時刻
 # ==================================================
-
-TIME_WINDOWS = [
-    ((7, 30), (8, 30)),
-    ((17, 30), (18, 30)),
-    ((22, 30), (23, 30)),
-]
-
 
 def random_time_for_date(
     target_date,
@@ -429,6 +841,7 @@ def random_time_for_date(
         end_minute
     ) = window
 
+
     start = datetime(
         target_date.year,
         target_date.month,
@@ -438,6 +851,7 @@ def random_time_for_date(
         0,
         tzinfo=JST,
     )
+
 
     end = datetime(
         target_date.year,
@@ -449,54 +863,112 @@ def random_time_for_date(
         tzinfo=JST,
     )
 
+
     seconds_range = int(
-        (end - start).total_seconds()
+        (
+            end - start
+        ).total_seconds()
     )
 
-    random_seconds = random.randint(
+
+    seconds = random.randint(
         0,
         seconds_range
     )
 
-    return start + timedelta(
-        seconds=random_seconds
+
+    return (
+        start
+        + timedelta(
+            seconds=seconds
+        )
     )
 
 
 # ==================================================
-# 10日 × 1日3回
+# 新規予約の開始日
 # ==================================================
 
-now = datetime.now(JST)
+if pending_items:
 
-start_date = (
-    now + timedelta(days=1)
-).date()
+    last_scheduled = max(
+        datetime.fromisoformat(
+            item["scheduled_at"]
+        )
+        for item in pending_items
+    )
 
-schedule = []
+    # 現在の最後の予約の翌日から
+    start_date = (
+        last_scheduled
+        + timedelta(days=1)
+    ).date()
+
+else:
+
+    # ストック0なら明日から
+    start_date = (
+        datetime.now(JST)
+        + timedelta(days=1)
+    ).date()
+
+
+print("")
+print(
+    "新規予約開始日:",
+    start_date
+)
+
+
+# ==================================================
+# 新規スケジュール作成
+# ==================================================
+
+new_schedule = []
 
 index = 0
+day = 0
 
-for day in range(10):
+
+while (
+    index
+    < len(mixed_candidates)
+):
 
     target_date = (
         start_date
         + timedelta(days=day)
     )
 
+
     for window in TIME_WINDOWS:
 
-        if index >= len(mixed_candidates):
+        if (
+            index
+            >= len(
+                mixed_candidates
+            )
+        ):
             break
 
-        scheduled_at = random_time_for_date(
-            target_date,
-            window
+
+        scheduled_at = (
+            random_time_for_date(
+                target_date,
+                window
+            )
         )
 
-        item = mixed_candidates[index]
 
-        schedule.append({
+        item = (
+            mixed_candidates[
+                index
+            ]
+        )
+
+
+        new_schedule.append({
+
             "scheduled_at":
                 scheduled_at.isoformat(),
 
@@ -515,27 +987,41 @@ for day in range(10):
             **item,
         })
 
+
         index += 1
 
 
-schedule.sort(
+    day += 1
+
+
+# ==================================================
+# 既存pending + 新規を結合
+# ==================================================
+
+final_schedule = (
+    pending_items
+    + new_schedule
+)
+
+
+final_schedule.sort(
     key=lambda x:
         x["scheduled_at"]
 )
 
 
 # ==================================================
-# schedule.json 保存
+# schedule.json保存
 # ==================================================
 
 with open(
-    "schedule.json",
+    SCHEDULE_FILE,
     "w",
     encoding="utf-8"
 ) as f:
 
     json.dump(
-        schedule,
+        final_schedule,
         f,
         ensure_ascii=False,
         indent=2
@@ -543,45 +1029,60 @@ with open(
 
 
 # ==================================================
-# ログ
+# 結果
 # ==================================================
 
 print("")
-print("=== 投稿予定 ===")
+print("==========================")
+print("📦 補充完了")
+print("==========================")
+
+print(
+    "補充前:",
+    len(pending_items)
+)
+
+print(
+    "追加:",
+    len(new_schedule)
+)
+
+print(
+    "補充後:",
+    len(final_schedule)
+)
+
+
+print("")
+print("=== 新しく追加した予定 ===")
+
 
 for number, item in enumerate(
-    schedule,
+    new_schedule,
     start=1
 ):
 
     print(
         number,
         item["scheduled_at"],
-        "配信:",
-        item["release_date"],
         "genre:",
         item["genre_id"],
         item["title"]
     )
 
 
-print("")
-print(
-    "schedule.json に",
-    len(schedule),
-    "件保存しました。"
-)
-
-
-if len(schedule) < TOTAL_POSTS:
+if (
+    len(final_schedule)
+    < TARGET_STOCK
+):
 
     print("")
     print(
-        "⚠️ 30件に届きませんでした。"
+        "⚠️ 30件まで"
+        "補充できませんでした。"
     )
 
     print(
-        "予約除外・除外ワード・"
-        "画像・サンプル動画条件で"
-        "候補が不足しています。"
+        "条件に合う新規作品が"
+        "不足しています。"
     )
