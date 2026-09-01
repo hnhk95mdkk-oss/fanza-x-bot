@@ -423,7 +423,52 @@ schedule[index]["posted_at"] = (
 schedule[index]["tweet_id"] = (
     str(tweet_id)
 )
+# ==================================================
+# 投稿済み作品IDを保存
+# ==================================================
 
+POSTED_IDS_FILE = "posted_ids.json"
+
+if os.path.exists(POSTED_IDS_FILE):
+
+    with open(
+        POSTED_IDS_FILE,
+        "r",
+        encoding="utf-8"
+    ) as f:
+        posted_ids = json.load(f)
+
+else:
+    posted_ids = []
+
+
+content_id = item.get("content_id")
+
+if (
+    content_id
+    and content_id not in posted_ids
+):
+    posted_ids.append(content_id)
+
+
+with open(
+    POSTED_IDS_FILE,
+    "w",
+    encoding="utf-8"
+) as f:
+
+    json.dump(
+        posted_ids,
+        f,
+        ensure_ascii=False,
+        indent=2
+    )
+
+
+print(
+    "posted_ids.json に"
+    "投稿済み作品を記録しました。"
+)
 schedule[index][
     "video_attached"
 ] = bool(media_id)
