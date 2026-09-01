@@ -33,16 +33,26 @@ jobs:
           X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
         run: python post_scheduled.py
 
-      - name: Save updated schedule
+      - name: Refill FANZA schedule
+        env:
+          DMM_API_ID: ${{ secrets.DMM_API_ID }}
+          DMM_AFFILIATE_ID: ${{ secrets.DMM_AFFILIATE_ID }}
+          DMM_GENRE_IDS: ${{ secrets.DMM_GENRE_IDS }}
+        run: python build_schedule.py
+
+      - name: Save bot state
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
           git add schedule.json
 
+          if [ -f posted_ids.json ]; then
+            git add posted_ids.json
+          fi
+
           git diff --cached --quiet || \
-          git commit -m "Update posted FANZA item"
+          git commit -m "Update FANZA bot state"
 
           git pull --rebase origin main
           git push
-  
