@@ -223,7 +223,18 @@ def make_candidate(
         .get("sample_s", {})
         .get("image", [])
     )
+    # --------------------------
+    # 予約・未配信作品を除外
+    # --------------------------
 
+    if not is_available_now(item):
+
+        print(
+            "予約・未配信のため除外:",
+            title
+        )
+
+        return None
 
     # --------------------------
     # 必須データ
