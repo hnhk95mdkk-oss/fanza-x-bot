@@ -1,203 +1,510 @@
+import os
 import json
-from html import escape
+import random
+import requests
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
-SCHEDULE_FILE = "schedule.json"
-OUTPUT_FILE = "review.html"
+API_URL = "https://api.dmm.com/affiliate/v3/ItemList"
 
-GENRE_NAMES = {
-    "1083": "幼なじみ",
-    "4111": "NTR",
-    "4124": "マッサージ・リフレ",
-    "4106": "騎乗位",
-    "5067": "顔面騎乗",
-}
+API_ID = os.environ["DMM_API_ID"].strip()
+AFFILIATE_ID = os.environ["DMM_AFFILIATE_ID"].strip()
 
-with open(SCHEDULE_FILE, "r", encoding="utf-8") as f:
-    schedule = json.load(f)
+GENRE_IDS = [
+    x.strip()
+    for x in os.environ["DMM_GENRE_IDS"].split(",")
+    if x.strip()
+]
 
-cards = []
+POSTS_PER_GENRE = 6
+TOTAL_POSTS = 30
 
-for i, item in enumerate(schedule, start=1):
-    title = escape(item.get("title", ""))
-    genre_id = str(item.get("genre_id", ""))
-    genre_name = escape(GENRE_NAMES.get(genre_id, genre_id))
-    scheduled_at = escape(item.get("scheduled_at", ""))
-    status = escape(item.get("status", ""))
-    affiliate_url = item.get("affiliate_url", "")
-    image_url = item.get("image_url", "")
+JST = ZoneInfo("Asia/Tokyo")
 
-    image_html = ""
-    if image_url:
-        image_html = f'''
-        <img
-            src="{escape(image_url)}"
-            alt="{title}"
-            loading="lazy"
-        >
-        '''
+EXCLUDE_FILE = "exclude_words.txt"
 
-    link_html = ""
-    if affiliate_url:
-        link_html = f'''
-        <a
-            class="button"
-            href="{escape(affiliate_url)}"
-            target="_blank"
-            rel="noopener noreferrer"
-        >
-            FANZAで確認
-        </a>
-        '''
 
-    card = f"""
-    <article class="card">
-        <div class="number">#{i}</div>
+# =====================================
+# 除外ワード読み込み
+# =====================================
 
-        {image_html}
+def load_exclude_words():
 
-        <div class="content">
-            <div class="meta">
-                <span>{genre_name}</span>
-                <span>{status}</span>
-            </div>
+    if not os.path.exists(EXCLUDE_FILE):
+        print("exclude_words.txt がありません。")
+        return []
 
-            <h2>{title}</h2>
+    words = []
 
-            <p class="time">
-                {scheduled_at}
-            </p>
+    with open(
+        EXCLUDE_FILE,
+        "r",
+        encoding="utf-8"
+    ) as f:
 
-            {link_html}
-        </div>
-    </article>
-    """
+        for line in f:
 
-    cards.append(card)
+            word = line.strip()
 
-html = f"""<!doctype html>
-<html lang="ja">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+            # 空行は無視
+            if not word:
+                continue
 
-<title>FANZA 投稿候補レビュー</title>
+            # # で始まる行はコメント扱い
+            if word.startswith("#"):
+                continue
 
-<style>
-    body {{
-        margin: 0;
-        padding: 16px;
-        background: #f5f5f5;
-        font-family:
-            -apple-system,
-            BlinkMacSystemFont,
-            "Helvetica Neue",
-            Arial,
-            sans-serif;
-        color: #222;
-    }}
+            words.append(word)
 
-    h1 {{
-        font-size: 24px;
-        margin: 0 0 8px;
-    }}
+    return words
 
-    .summary {{
-        margin-bottom: 20px;
-        color: #666;
-    }}
 
-    .grid {{
-        display: grid;
-        grid-template-columns:
-            repeat(auto-fit, minmax(280px, 1fr));
-        gap: 16px;
-    }}
+EXCLUDE_WORDS = load_exclude_words()
 
-    .card {{
-        background: white;
-        border-radius: 14px;
-        overflow: hidden;
-        box-shadow:
-            0 2px 10px rgba(0, 0, 0, 0.08);
-        position: relative;
-    }}
+print("")
+print("=== 除外ワード ===")
 
-    .card img {{
-        width: 100%;
-        display: block;
-        aspect-ratio: 4 / 3;
-        object-fit: cover;
-        background: #ddd;
-    }}
+for word in EXCLUDE_WORDS:
+    print("-", word)
 
-    .content {{
-        padding: 14px;
-    }}
+print("==================")
 
-    .number {{
-        position: absolute;
-        top: 8px;
-        left: 8px;
-        background: rgba(0, 0, 0, 0.75);
-        color: white;
-        padding: 4px 8px;
-        border-radius: 8px;
-        font-size: 13px;
-        z-index: 2;
-    }}
 
-    .meta {{
-        display: flex;
-        justify-content: space-between;
-        gap: 8px;
-        font-size: 13px;
-        color: #666;
-        margin-bottom: 8px;
-    }}
+# =====================================
+# FANZA商品取得
+# =====================================
 
-    h2 {{
-        font-size: 16px;
-        line-height: 1.45;
-        margin: 0 0 10px;
-    }}
+def fetch_genre_items(genre_id):
 
-    .time {{
-        font-size: 13px;
-        color: #555;
-    }}
+    params = {
+        "api_id": API_ID,
+        "affiliate_id": AFFILIATE_ID,
+        "site": "FANZA",
+        "service": "digital",
+        "floor": "videoa",
+        "genre_id": genre_id,
+        "hits": 100,
+        "sort": "date",
+        "output": "json",
+    }
 
-    .button {{
-        display: block;
-        text-align: center;
-        text-decoration: none;
-        background: #111;
-        color: white;
-        padding: 12px;
-        border-radius: 10px;
-        margin-top: 12px;
-        font-weight: bold;
-    }}
-</style>
-</head>
+    response = requests.get(
+        API_URL,
+        params=params,
+        timeout=30
+    )
 
-<body>
+    print(
+        f"genre_id={genre_id} "
+        f"HTTP={response.status_code}"
+    )
 
-<h1>FANZA 投稿候補レビュー</h1>
+    if response.status_code != 200:
+        print(response.text)
+        return []
 
-<div class="summary">
-    投稿候補: {len(schedule)}件
-</div>
+    data = response.json()
 
-<div class="grid">
-    {''.join(cards)}
-</div>
+    return (
+        data
+        .get("result", {})
+        .get("items", [])
+    )
 
-</body>
-</html>
-"""
 
-with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-    f.write(html)
+# =====================================
+# 除外判定
+# =====================================
 
-print(f"{OUTPUT_FILE} を作成しました。")
-print(f"候補件数: {len(schedule)}")
+def contains_excluded_word(text):
+
+    if not text:
+        return None
+
+    text_lower = text.lower()
+
+    for word in EXCLUDE_WORDS:
+
+        if word.lower() in text_lower:
+            return word
+
+    return None
+
+
+# =====================================
+# 商品候補化
+# =====================================
+
+def make_candidate(item, genre_id):
+
+    content_id = item.get("content_id")
+    title = item.get("title", "")
+    affiliate_url = item.get("affiliateURL")
+
+    image_url = (
+        item.get("imageURL", {})
+        .get("large")
+    )
+
+    sample_movie = item.get("sampleMovieURL")
+
+    sample_images = (
+        item.get("sampleImageURL", {})
+        .get("sample_s", {})
+        .get("image", [])
+    )
+
+    if not content_id:
+        return None
+
+    if not title:
+        return None
+
+    if not affiliate_url:
+        return None
+
+    if not image_url:
+        return None
+
+    if not sample_movie:
+        return None
+
+    # -----------------------------
+    # 除外ワード判定
+    # -----------------------------
+
+    matched_word = contains_excluded_word(
+        title
+    )
+
+    if matched_word:
+
+        print(
+            f"除外 [{matched_word}]: "
+            f"{title}"
+        )
+
+        return None
+
+    return {
+        "content_id": content_id,
+        "genre_id": genre_id,
+        "title": title,
+        "affiliate_url": affiliate_url,
+        "image_url": image_url,
+        "sample_images": sample_images,
+        "sample_movie": sample_movie,
+    }
+
+
+# =====================================
+# 各ジャンルから候補取得
+# =====================================
+
+candidates = []
+used_ids = set()
+
+for genre_id in GENRE_IDS:
+
+    print("")
+    print("====================")
+    print("ジャンル:", genre_id)
+    print("====================")
+
+    items = fetch_genre_items(
+        genre_id
+    )
+
+    genre_count = 0
+
+    for item in items:
+
+        candidate = make_candidate(
+            item,
+            genre_id
+        )
+
+        if candidate is None:
+            continue
+
+        content_id = candidate[
+            "content_id"
+        ]
+
+        # 同じ作品の重複防止
+        if content_id in used_ids:
+            continue
+
+        candidates.append(
+            candidate
+        )
+
+        used_ids.add(
+            content_id
+        )
+
+        genre_count += 1
+
+        if genre_count >= POSTS_PER_GENRE:
+            break
+
+    print(
+        f"採用作品数: "
+        f"{genre_count}/"
+        f"{POSTS_PER_GENRE}"
+    )
+
+
+print("")
+print("====================")
+print(
+    "候補合計:",
+    len(candidates)
+)
+print("====================")
+
+
+# =====================================
+# ジャンル分散
+# =====================================
+
+by_genre = {}
+
+for item in candidates:
+
+    genre = item["genre_id"]
+
+    by_genre.setdefault(
+        genre,
+        []
+    ).append(item)
+
+
+for genre in by_genre:
+    random.shuffle(
+        by_genre[genre]
+    )
+
+
+genre_ids = list(
+    by_genre.keys()
+)
+
+mixed_candidates = []
+
+
+while len(
+    mixed_candidates
+) < TOTAL_POSTS:
+
+    random.shuffle(
+        genre_ids
+    )
+
+    added = False
+
+    for genre in genre_ids:
+
+        if by_genre[genre]:
+
+            mixed_candidates.append(
+                by_genre[genre].pop(0)
+            )
+
+            added = True
+
+            if len(
+                mixed_candidates
+            ) >= TOTAL_POSTS:
+                break
+
+    if not added:
+        break
+
+
+# =====================================
+# 投稿時間帯
+# =====================================
+
+TIME_WINDOWS = [
+
+    # 朝
+    ((7, 30), (8, 30)),
+
+    # 夕
+    ((17, 30), (18, 30)),
+
+    # 夜
+    ((22, 30), (23, 30)),
+]
+
+
+def random_time_for_date(
+    date,
+    window
+):
+
+    (start_h, start_m), (
+        end_h,
+        end_m
+    ) = window
+
+    start = datetime(
+        date.year,
+        date.month,
+        date.day,
+        start_h,
+        start_m,
+        0,
+        tzinfo=JST,
+    )
+
+    end = datetime(
+        date.year,
+        date.month,
+        date.day,
+        end_h,
+        end_m,
+        59,
+        tzinfo=JST,
+    )
+
+    seconds_range = int(
+        (
+            end - start
+        ).total_seconds()
+    )
+
+    random_seconds = (
+        random.randint(
+            0,
+            seconds_range
+        )
+    )
+
+    return (
+        start
+        + timedelta(
+            seconds=random_seconds
+        )
+    )
+
+
+# =====================================
+# 10日 × 3投稿
+# =====================================
+
+now = datetime.now(JST)
+
+start_date = (
+    now
+    + timedelta(days=1)
+).date()
+
+schedule = []
+
+index = 0
+
+
+for day in range(10):
+
+    target_date = (
+        start_date
+        + timedelta(days=day)
+    )
+
+    for window in TIME_WINDOWS:
+
+        if index >= len(
+            mixed_candidates
+        ):
+            break
+
+        scheduled_at = (
+            random_time_for_date(
+                target_date,
+                window
+            )
+        )
+
+        item = (
+            mixed_candidates[index]
+        )
+
+        schedule.append({
+            "scheduled_at":
+                scheduled_at.isoformat(),
+
+            "status":
+                "pending",
+
+            "posted_at":
+                None,
+
+            **item,
+        })
+
+        index += 1
+
+
+schedule.sort(
+    key=lambda x:
+        x["scheduled_at"]
+)
+
+
+# =====================================
+# 保存
+# =====================================
+
+with open(
+    "schedule.json",
+    "w",
+    encoding="utf-8"
+) as f:
+
+    json.dump(
+        schedule,
+        f,
+        ensure_ascii=False,
+        indent=2
+    )
+
+
+print("")
+print("=== 投稿予定 ===")
+
+for n, item in enumerate(
+    schedule,
+    start=1
+):
+
+    print(
+        n,
+        item["scheduled_at"],
+        "genre:",
+        item["genre_id"],
+        item["title"]
+    )
+
+
+print("")
+print(
+    f"schedule.json に "
+    f"{len(schedule)}件保存しました。"
+)
+
+
+if len(schedule) < TOTAL_POSTS:
+
+    print("")
+    print(
+        "⚠️ 30作品に"
+        "届きませんでした。"
+    )
+
+    print(
+        "除外ワードや"
+        "サンプル動画条件によって"
+        "候補が不足しています。"
+    )
