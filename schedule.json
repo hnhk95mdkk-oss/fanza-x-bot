@@ -1134,9 +1134,9 @@
   },
   {
     "scheduled_at": "2026-09-01T22:36:28+09:00",
-    "status": "pending",
-    "posted_at": null,
-    "tweet_id": null,
+    "status": "posted",
+    "posted_at": "2026-09-01T23:31:19.040716+09:00",
+    "tweet_id": "2094795239596958040",
     "video_attached": false,
     "content_id": "crnx00362",
     "genre_id": "5067",
