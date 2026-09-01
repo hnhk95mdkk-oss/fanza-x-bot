@@ -196,6 +196,8 @@ def download_video(url):
         .get("Content-Type", "")
         .lower()
     )
+    print("Final URL:", response.url)
+    print("Content-Type:", content_type)
 
     print(
         "Content-Type:",
