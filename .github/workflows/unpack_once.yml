@@ -17,12 +17,19 @@ jobs:
       - name: Extract without overwriting existing files
         run: unzip -n fanza-x-automation.zip
 
-      - name: Commit extracted files and remove temporary files
+      - name: Expose workflow contents for controlled creation
         run: |
-          rm -f fanza-x-automation.zip .github/workflows/unpack_once.yml
+          for file in .github/workflows/pick_schedule.yml .github/workflows/collect_candidates.yml .github/workflows/post_tweet.yml .github/workflows/download_and_upload.yml; do
+            echo "BEGIN_FILE:${file}"
+            sed 's/^/FILE_LINE:/' "${file}"
+            echo "END_FILE:${file}"
+          done
+
+      - name: Commit non-workflow files
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .env.example src .github/workflows
-          git add -u
-          git commit -m "Add automation files from uploaded archive"
+          git add .env.example src
+          git rm fanza-x-automation.zip
+          git commit -m "Add automation source files"
           git push
